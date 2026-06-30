@@ -216,10 +216,13 @@ resid1=resid(:,1:K1);
 resid2=resid(:,K1+1:K);
 iv=iv(nlags+1:size(iv,1),:);
 
+% Identify valid (non-NaN) instrument observations
+valid_iv = all(~isnan(iv), 2);
+
 % First stage: regress instrumented residuals on instruments
 for xx=1:K1
-    X_fs = iv;
-    y_fs = resid1(:,xx);
+    X_fs = iv(valid_iv,:);
+    y_fs = resid1(valid_iv,xx);
     beta_fs = X_fs\y_fs;
     first_stage(xx,:) = beta_fs';
     
@@ -239,7 +242,7 @@ clear SE_robust
 % Second stage: effects on non-instrumented variables
 for xx=1:K2
     X_ss = pred_firststage;
-    y_ss = resid2(:,xx);
+    y_ss = resid2(valid_iv,xx);
     beta_ss = X_ss\y_ss;
     X(xx,:) = beta_ss';
 end
@@ -389,8 +392,8 @@ for jj=1:bootstrap_num
     resid2_temp=resid_temp(:,K1+1:K);
     
     for xx=1:K1
-        X_fs_temp = iv_sim(:,:,jj);
-        y_fs_temp = resid1_temp(:,xx);
+        X_fs_temp = iv_sim(valid_iv,:,jj);
+        y_fs_temp = resid1_temp(valid_iv,xx);
         beta_fs_temp = X_fs_temp\y_fs_temp;
         first_stage_temp(xx,:) = beta_fs_temp';
         pred_firststage_temp(:,xx) = X_fs_temp * beta_fs_temp;
@@ -399,7 +402,7 @@ for jj=1:bootstrap_num
     clear X_temp
     for xx=1:K2
         X_ss_temp = pred_firststage_temp;
-        y_ss_temp = resid2_temp(:,xx);
+        y_ss_temp = resid2_temp(valid_iv,xx);
         beta_ss_temp = X_ss_temp\y_ss_temp;
         X_temp(xx,:) = beta_ss_temp';
     end
@@ -538,8 +541,11 @@ end
 EQ.stdirf=irf_std;
 
 % Recover structural shocks (Lunsford, 2015)
-phi=((1/(size(data,1)-K*nlags-1)*iv'*resid)*inv(varcovar)*(1/(size(data,1)-K*nlags-1)*resid'*iv))^(1/2);
-pai=varcovar^(-1)*(size(data,1)-K*nlags-1)^(-1)*resid'*iv;
+T_iv=sum(valid_iv);
+iv_valid=iv(valid_iv,:);
+resid_valid=resid(valid_iv,:);
+phi=((1/(T_iv-1)*iv_valid'*resid_valid)*inv(varcovar)*(1/(T_iv-1)*resid_valid'*iv_valid))^(1/2);
+pai=varcovar^(-1)*(T_iv-1)^(-1)*resid_valid'*iv_valid;
 EQ.struc=(resid*pai*phi^(-1))';
 
 end
