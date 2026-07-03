@@ -216,10 +216,13 @@ resid1=resid(:,1:K1);
 resid2=resid(:,K1+1:K);
 iv=iv(nlags+1:size(iv,1),:);
 
+% Identify valid (non-NaN) instrument observations
+valid_iv = all(~isnan(iv), 2);
+
 % First stage: regress instrumented residuals on instruments
 for xx=1:K1
-    X_fs = iv;
-    y_fs = resid1(:,xx);
+    X_fs = iv(valid_iv,:);
+    y_fs = resid1(valid_iv,xx);
     beta_fs = X_fs\y_fs;
     first_stage(xx,:) = beta_fs';
     
@@ -239,9 +242,20 @@ clear SE_robust
 % Second stage: effects on non-instrumented variables
 for xx=1:K2
     X_ss = pred_firststage;
-    y_ss = resid2(:,xx);
+    y_ss = resid2(valid_iv,xx);
     beta_ss = X_ss\y_ss;
     X(xx,:) = beta_ss';
+end
+
+% Apply contemporaneous restrictions from lr
+if ~isempty(lr)
+    for xx=1:K2
+        for kk=1:K1
+            if lr(K1+xx,kk)==0
+                X(xx,kk)=0;
+            end
+        end
+    end
 end
 
 X=X(:,1);
@@ -313,39 +327,61 @@ for xx=1:K1
 end
 
 % Block bootstrap for confidence intervals (preserves autocorrelation)
-u=zeros(K,size(resid,1),bootstrap_num);
-iv_sim=zeros(size(iv,1),K1,bootstrap_num);
+T_resid=size(resid,1);
+u=zeros(K,T_resid,bootstrap_num);
 
-% Optimal block length: l = T^(1/4)
-l=(size(data,1)-nlags)^(1/4);
-l=ceil(l);
-NN=(size(data,1)-nlags)/l;
-NN=ceil(NN);
-
-% Create blocks
-for xx=1:size(data,1)-nlags-l+1
+% --- Full-sample residual blocks (for VAR simulation) ---
+l=ceil(T_resid^(1/4));
+NN=ceil(T_resid/l);
+for xx=1:T_resid-l+1
     UU(:,:,xx)=resid(xx:xx+l-1,:)';
-    MM(:,:,xx)=iv(xx:xx+l-1,:)';
+end
+
+% --- Valid-subsample joint blocks (for IV identification) ---
+% Residuals and IV paired jointly, only where IV is available
+resid_valid=resid(valid_iv,:);
+iv_valid=iv(valid_iv,:);
+T_iv=sum(valid_iv);
+l_iv=ceil(T_iv^(1/4));
+NN_iv=ceil(T_iv/l_iv);
+for xx=1:T_iv-l_iv+1
+    UU_iv(:,:,xx)=resid_valid(xx:xx+l_iv-1,:)';
+    MM_iv(:,:,xx)=iv_valid(xx:xx+l_iv-1,:)';
 end
 
 % Bootstrap resampling
+iv_sim=zeros(T_iv,K1,bootstrap_num);
+resid_iv_sim=zeros(T_iv,K,bootstrap_num);
 for xx=1:bootstrap_num
     if verbose==true
         xx
     end
-    rs=randi(size(data,1)-nlags-l+1,[NN,1]);
+    % Full-sample residual resampling (for VAR data simulation)
+    rs=randi(T_resid-l+1,[NN,1]);
     u_1=zeros(K,l*NN);
-    iv_sim_1=zeros(K1,l*NN);
     for yy=1:size(rs,1)
         u_1(:,(yy-1)*l+1:yy*l)=UU(:,:,rs(yy));
-        iv_sim_1(:,(yy-1)*l+1:yy*l)=MM(:,:,rs(yy));
     end
-    u_1=u_1(:,1:size(u_1,2)-(NN*l-(size(data,1)-nlags)));
-    iv_sim_1=iv_sim_1(:,1:size(iv_sim_1,2)-(NN*l-(size(data,1)-nlags)));
+    u_1=u_1(:,1:T_resid);
     mean_u1=mean(u_1,2);
-    mean_ivsim1=mean(iv_sim_1,2);
-    for yy=1:size(u_1,2)
+    for yy=1:T_resid
         u(:,yy,xx)=u_1(:,yy)-mean_u1;
+    end
+
+    % Valid-subsample joint resampling (residuals + IV paired)
+    rs_iv=randi(T_iv-l_iv+1,[NN_iv,1]);
+    u_iv_1=zeros(K,l_iv*NN_iv);
+    iv_sim_1=zeros(K1,l_iv*NN_iv);
+    for yy=1:size(rs_iv,1)
+        u_iv_1(:,(yy-1)*l_iv+1:yy*l_iv)=UU_iv(:,:,rs_iv(yy));
+        iv_sim_1(:,(yy-1)*l_iv+1:yy*l_iv)=MM_iv(:,:,rs_iv(yy));
+    end
+    u_iv_1=u_iv_1(:,1:T_iv);
+    iv_sim_1=iv_sim_1(:,1:T_iv);
+    mean_u_iv=mean(u_iv_1,2);
+    mean_ivsim1=mean(iv_sim_1,2);
+    for yy=1:T_iv
+        resid_iv_sim(yy,:,xx)=(u_iv_1(:,yy)-mean_u_iv)';
         iv_sim(yy,:,xx)=(iv_sim_1(:,yy)-mean_ivsim1)';
     end
 end
@@ -400,26 +436,39 @@ clear temp
 for jj=1:bootstrap_num
     Q_temp=reducedformVAR(y(:,:,jj),nlags,const,lr,[],dum,exog);
     varcovar_temp=Q_temp.sigma;
-    resid_temp=Q_temp.resid;
-    resid1_temp=resid_temp(:,1:K1);
-    resid2_temp=resid_temp(:,K1+1:K);
-    
+
+    % Use jointly-resampled residuals and IV from valid subsample
+    resid_iv_temp=resid_iv_sim(:,:,jj);
+    resid1_iv_temp=resid_iv_temp(:,1:K1);
+    resid2_iv_temp=resid_iv_temp(:,K1+1:K);
+
     for xx=1:K1
         X_fs_temp = iv_sim(:,:,jj);
-        y_fs_temp = resid1_temp(:,xx);
+        y_fs_temp = resid1_iv_temp(:,xx);
         beta_fs_temp = X_fs_temp\y_fs_temp;
         first_stage_temp(xx,:) = beta_fs_temp';
         pred_firststage_temp(:,xx) = X_fs_temp * beta_fs_temp;
     end
-    
+
     clear X_temp
     for xx=1:K2
         X_ss_temp = pred_firststage_temp;
-        y_ss_temp = resid2_temp(:,xx);
+        y_ss_temp = resid2_iv_temp(:,xx);
         beta_ss_temp = X_ss_temp\y_ss_temp;
         X_temp(xx,:) = beta_ss_temp';
     end
-    
+
+    % Apply contemporaneous restrictions from lr
+    if ~isempty(lr)
+        for xx=1:K2
+            for kk=1:K1
+                if lr(K1+xx,kk)==0
+                    X_temp(xx,kk)=0;
+                end
+            end
+        end
+    end
+
     X_temp=X_temp(:,1);
     varcovar11_temp=varcovar_temp(1:K1,1:K1);
     varcovar12_temp=varcovar_temp(1:K1,K1+1:K);
@@ -554,8 +603,11 @@ end
 EQ.stdirf=irf_std;
 
 % Recover structural shocks (Lunsford, 2015)
-phi=((1/(size(data,1)-K*nlags-1)*iv'*resid)*inv(varcovar)*(1/(size(data,1)-K*nlags-1)*resid'*iv))^(1/2);
-pai=varcovar^(-1)*(size(data,1)-K*nlags-1)^(-1)*resid'*iv;
+T_iv=sum(valid_iv);
+iv_valid=iv(valid_iv,:);
+resid_valid=resid(valid_iv,:);
+phi=((1/(T_iv-1)*iv_valid'*resid_valid)*inv(varcovar)*(1/(T_iv-1)*resid_valid'*iv_valid))^(1/2);
+pai=varcovar^(-1)*(T_iv-1)^(-1)*resid_valid'*iv_valid;
 EQ.struc=(resid*pai*phi^(-1))';
 
 end

@@ -247,6 +247,17 @@ for xx=1:K2
     X(xx,:) = beta_ss';
 end
 
+% Apply contemporaneous restrictions from lr
+if ~isempty(lr)
+    for xx=1:K2
+        for kk=1:K1
+            if lr(K1+xx,kk)==0
+                X(xx,kk)=0;
+            end
+        end
+    end
+end
+
 X=X(:,1);
 
 % Compute absolute IRFs following Mertens & Ravn (2013)
@@ -406,7 +417,18 @@ for jj=1:bootstrap_num
         beta_ss_temp = X_ss_temp\y_ss_temp;
         X_temp(xx,:) = beta_ss_temp';
     end
-    
+
+    % Apply contemporaneous restrictions from lr
+    if ~isempty(lr)
+        for xx=1:K2
+            for kk=1:K1
+                if lr(K1+xx,kk)==0
+                    X_temp(xx,kk)=0;
+                end
+            end
+        end
+    end
+
     X_temp=X_temp(:,1);
     varcovar11_temp=varcovar_temp(1:K1,1:K1);
     varcovar12_temp=varcovar_temp(1:K1,K1+1:K);
