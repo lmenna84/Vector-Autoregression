@@ -219,32 +219,32 @@ iv=iv(nlags+1:size(iv,1),:);
 % Identify valid (non-NaN) instrument observations
 valid_iv = all(~isnan(iv), 2);
 
-% First stage: regress instrumented residuals on instruments
+% First stage: regress instrumented residuals on instruments (with constant)
 for xx=1:K1
-    X_fs = iv(valid_iv,:);
+    X_fs = [ones(sum(valid_iv),1) iv(valid_iv,:)];
     y_fs = resid1(valid_iv,xx);
     beta_fs = X_fs\y_fs;
-    first_stage(xx,:) = beta_fs';
-    
-    % Compute robust standard errors
+    first_stage(xx,:) = beta_fs(2:end)';
+
+    % Compute robust standard errors (on slope coefficients only)
     resid_fs = y_fs - X_fs*beta_fs;
     meat = X_fs' * diag(resid_fs.^2) * X_fs;
     bread = inv(X_fs' * X_fs);
     vcov_robust = bread * meat * bread;
-    SE_robust(xx,:) = sqrt(diag(vcov_robust))';
-    
+    SE_robust(xx,:) = sqrt(diag(vcov_robust(2:end,2:end)))';
+
     pred_firststage(:,xx) = X_fs * beta_fs;
-    EQ.robustF(xx,:) = (first_stage(xx,:) / SE_robust(xx,:))^2;
+    EQ.robustF(xx,:) = (first_stage(xx,:) ./ SE_robust(xx,:)).^2;
 end
 
 clear SE_robust
 
-% Second stage: effects on non-instrumented variables
+% Second stage: effects on non-instrumented variables (with constant)
 for xx=1:K2
-    X_ss = pred_firststage;
+    X_ss = [ones(size(pred_firststage,1),1) pred_firststage];
     y_ss = resid2(valid_iv,xx);
     beta_ss = X_ss\y_ss;
-    X(xx,:) = beta_ss';
+    X(xx,:) = beta_ss(2:end)';
 end
 
 % Apply contemporaneous restrictions from lr
@@ -257,8 +257,6 @@ if ~isempty(lr)
         end
     end
 end
-
-X=X(:,1);
 
 % Compute absolute IRFs following Mertens & Ravn (2013)
 varcovar11=varcovar(1:K1,1:K1);
@@ -443,19 +441,19 @@ for jj=1:bootstrap_num
     resid2_iv_temp=resid_iv_temp(:,K1+1:K);
 
     for xx=1:K1
-        X_fs_temp = iv_sim(:,:,jj);
+        X_fs_temp = [ones(size(iv_sim,1),1) iv_sim(:,:,jj)];
         y_fs_temp = resid1_iv_temp(:,xx);
         beta_fs_temp = X_fs_temp\y_fs_temp;
-        first_stage_temp(xx,:) = beta_fs_temp';
+        first_stage_temp(xx,:) = beta_fs_temp(2:end)';
         pred_firststage_temp(:,xx) = X_fs_temp * beta_fs_temp;
     end
 
     clear X_temp
     for xx=1:K2
-        X_ss_temp = pred_firststage_temp;
+        X_ss_temp = [ones(size(pred_firststage_temp,1),1) pred_firststage_temp];
         y_ss_temp = resid2_iv_temp(:,xx);
         beta_ss_temp = X_ss_temp\y_ss_temp;
-        X_temp(xx,:) = beta_ss_temp';
+        X_temp(xx,:) = beta_ss_temp(2:end)';
     end
 
     % Apply contemporaneous restrictions from lr
@@ -469,7 +467,6 @@ for jj=1:bootstrap_num
         end
     end
 
-    X_temp=X_temp(:,1);
     varcovar11_temp=varcovar_temp(1:K1,1:K1);
     varcovar12_temp=varcovar_temp(1:K1,K1+1:K);
     varcovar21_temp=varcovar_temp(K1+1:K,1:K1);
@@ -602,12 +599,41 @@ end
 
 EQ.stdirf=irf_std;
 
-% Recover structural shocks (Lunsford, 2015)
-T_iv=sum(valid_iv);
+% Recover structural shocks (Ricco approach): regress proxy on constant +
+% all innovations (valid obs), predict full sample, normalize to unit variance
 iv_valid=iv(valid_iv,:);
 resid_valid=resid(valid_iv,:);
-phi=((1/(T_iv-1)*iv_valid'*resid_valid)*inv(varcovar)*(1/(T_iv-1)*resid_valid'*iv_valid))^(1/2);
-pai=varcovar^(-1)*(T_iv-1)^(-1)*resid_valid'*iv_valid;
-EQ.struc=(resid*pai*phi^(-1))';
+tempX_valid=[ones(sum(valid_iv),1) resid_valid];
+beta_struc=tempX_valid\iv_valid;
+e_full=[ones(size(resid,1),1) resid]*beta_struc;
+e_full=e_full./std(e_full);          % unit variance
+EQ.struc=(e_full-mean(e_full))';     % demeaned for output
+
+% Reliability of the instrument (Miranda-Agrippino & Ricco, 2021): 
+% It is basically the R2 of the regression z = gam*eps + res. We could run
+% the regression, but due to censoring and NaNs in proxy that would use
+% "incorrect" coefficients in P implicitly. So we recall that if we run
+% z=bet*u(:,1)+res, where u are the residuals of the VAR, the estimate delivers
+% gam*P(1,1). Dividing by P(1,1), we get gam, which to the power of 2 gives the
+% numerator of the R2. However, for numerical reasons we run z=bet*u+res instead,
+% but conceptually it is the same. Similar approach for the denominator of
+% the R2. Gam is adjusted for censoring
+T_full=sum(valid_iv);  % non-NaN obs only
+for xx=1:K1
+    z_xx=iv(:,xx);
+    D=z_xx~=0 & valid_iv;             % nonzero and non-NaN
+    SigmaMU=cov([z_xx(D) resid(D,:)], 1); % covariance between proxy and residuals
+    SigmaMU=SigmaMU(1,2:end); % covariance between proxy and residuals: gam*P(:,1)
+    Phi= SigmaMU/ bet1(:,xx)';  % obtain gam
+    Gamma=Phi * T_full / sum(D);       % censoring correction
+    % Noise uses recovered shock normalized over valid obs (matching Ricco)
+    e_valid_std=e_full(valid_iv,xx) / std(e_full(valid_iv,xx));
+    e_D=e_valid_std(D(valid_iv)); % need shock variance because it id not necessarily 1 in the uncensored sample, needed for R2
+    z_D=z_xx(D);
+    sig=Gamma^2 * sum(e_D.^2); % Numerator of R2
+    noi=sum((z_D - Gamma*e_D).^2); % needed for denominator of R2, variance of the measurement error
+    EQ.reliability(xx,1)=sig / (sig + noi);
+end
+
 
 end
