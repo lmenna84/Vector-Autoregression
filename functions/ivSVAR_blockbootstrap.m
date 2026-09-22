@@ -417,16 +417,15 @@ for xx=1:bootstrap_num
         conta=conta+1;
         if isempty(dum)==0
                 vec_dummies=zeros(size(V,2)-1,1);
-                if mod(conta,numdum)~=0
-                    prot=mod(conta,numdum);
-                else prot=numdum;
+                if mod(conta,numdum+1)~=0
+                    prot=mod(conta,numdum+1);
+                    vec_dummies(prot,1)=1;
                 end
-            vec_dummies(prot,1)=1;
             vec_dummies=[1;vec_dummies];
             else vec_dummies=1;
         end
         if isempty(exog)==0
-            Y(:,yy+1,xx)=V*vec_dummies+Vexo*exog(yy,:)'+A*Y(:,yy,xx)+U(:,yy,xx);
+            Y(:,yy+1,xx)=V*vec_dummies+Vexo*exog(nlags+yy,:)'+A*Y(:,yy,xx)+U(:,yy,xx);
         else Y(:,yy+1,xx)=V*vec_dummies+A*Y(:,yy,xx)+U(:,yy,xx);
         end
     end

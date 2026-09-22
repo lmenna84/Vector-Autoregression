@@ -266,8 +266,8 @@ end
 Vexo=zeros(K*nlags,size(exog,2));
 demmexo=isfield(exogeno_rf,'exo');
 if demmexo==1
-    Vexo(1:K,:)=[exogeno_rf.exo; Q.exo(K1+1:K2+K1)];
-    EQ.exo=[exogeno_rf.exo; Q.exo(K1+1:K2+K1)];
+    Vexo(1:K,:)=[exogeno_rf.exo; Q.exo(K1+1:K2+K1,:)];
+    EQ.exo=[exogeno_rf.exo; Q.exo(K1+1:K2+K1,:)];
 end
 
 demmdum=isfield(exogeno_rf,'dummies');
@@ -322,22 +322,33 @@ for xx=1:monte_carlo
     if verbose==true
         xx
     end
-    conta=0;
+    % Seasonal position of each simulated period in the estimation sample of
+    % the exogenous block (after the 100 burn-in periods and the nlags initial values)
+    conta=-99-nlags;
     for yy=1:size(data_bloqueexo,1)+99
         conta=conta+1;
         if isempty(dum)==0
                 vec_dummies=zeros(size(V,2)-1,1);
-                if mod(conta,numdum)~=0
-                    prot=mod(conta,numdum);
-                else prot=numdum;
+                if mod(conta,numdum+1)~=0
+                    prot=mod(conta,numdum+1);
+                    vec_dummies(prot,1)=1;
                 end
-            vec_dummies(prot,1)=1;
             vec_dummies=[1;vec_dummies];
+            % The endogenous block is estimated on the last T2 periods, so
+            % its seasonal position is shifted by T1-T2
+            vec_dummies_endo=zeros(size(V,2)-1,1);
+            if mod(conta-(T1-T2),numdum+1)~=0
+                prot=mod(conta-(T1-T2),numdum+1);
+                vec_dummies_endo(prot,1)=1;
+            end
+            vec_dummies_endo=[1;vec_dummies_endo];
             else vec_dummies=1;
+            vec_dummies_endo=1;
         end
+        Vd=[V(1:K1,:)*vec_dummies; V(K1+1:end,:)*vec_dummies_endo];
         if isempty(exog)==0
-            Y(:,yy+1,xx)=V*vec_dummies+Vexo*exo_u(:,yy)+A*Y(:,yy,xx)+U(:,yy+1,xx);
-        else Y(:,yy+1,xx)=V*vec_dummies+A*Y(:,yy,xx)+U(:,yy+1,xx);
+            Y(:,yy+1,xx)=Vd+Vexo*exo_u(:,yy+1)+A*Y(:,yy,xx)+U(:,yy+1,xx);
+        else Y(:,yy+1,xx)=Vd+A*Y(:,yy,xx)+U(:,yy+1,xx);
         end
     end
 end

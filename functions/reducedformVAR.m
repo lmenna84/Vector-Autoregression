@@ -205,7 +205,7 @@ elseif isempty(lr)==0 & const==false
     end
     M=count*nlags+K*numdum+K*numexo;
     R=zeros(K*(K*nlags+1)+K*numdum+K*numexo,M);
-    R(K+1:K+K*numdum+K*numexo,K+1:K+K*numdum+K*numexo)=eye(K*numdum+K*numexo);
+    R(K+1:K+K*numdum+K*numexo,1:K*numdum+K*numexo)=eye(K*numdum+K*numexo);
     lr1=reshape(lr,K*K,1);
     lr=zeros(0,0);
     for xx=1:nlags
@@ -215,7 +215,7 @@ elseif isempty(lr)==0 & const==false
     for xx=1:size(lr,1)
         if lr(xx,1)==1
         count=count+1;
-        R(K+xx,count)=1;
+        R(K+K*numdum+K*numexo+xx,K*numdum+K*numexo+count)=1;
         end
     end
 end
@@ -302,7 +302,7 @@ if forecast==true
         V(1:K,1)=B(:,1);
     end
     if isempty(dummy)==0
-        V(1:K,2:numdum+const)=B(:,2+numexo:const+numexo+numdum);
+        V(1:K,2:numdum+1)=B(:,2+numexo:1+numexo+numdum);
     end
     A=zeros(K*nlags,K*nlags);
     A(1:K,:)=B(:,2+numexo+numdum:size(B,2));

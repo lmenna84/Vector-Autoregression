@@ -144,12 +144,10 @@ for yy=1:size(data,1)-nlags
     % Create time-varying dummy vector
     if isempty(dum)==0
         vec_dummies=zeros(size(V,2)-1,1);
-        if mod(conta,numdum)~=0
-            prot=mod(conta,numdum);
-        else 
-            prot=numdum;
+        if mod(conta,numdum+1)~=0
+            prot=mod(conta,numdum+1);
+            vec_dummies(prot,1)=1;
         end
-        vec_dummies(prot,1)=1;
         vec_dummies=[1;vec_dummies];
     else 
         vec_dummies=1;
@@ -191,12 +189,10 @@ if forecast~=0
         % Create time-varying dummy vector for forecast
         if isempty(dum)==0
             vec_dummies_for=zeros(size(V,2)-1,1);
-            if mod(conta_for,numdum)~=0
-                prot=mod(conta_for,numdum);
-            else 
-                prot=numdum;
+            if mod(conta_for,numdum+1)~=0
+                prot=mod(conta_for,numdum+1);
+                vec_dummies_for(prot,1)=1;
             end
-            vec_dummies_for(prot,1)=1;
             vec_dummies_for=[1;vec_dummies_for];
         else 
             vec_dummies_for=1;
