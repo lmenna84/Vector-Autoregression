@@ -182,7 +182,7 @@ end
 T=size(data,1)-nlags;
 Q=reducedformVAR(data,nlags,const,lr,[],[],exog);
 
-% Compute robust F-statistic from OLS residuals
+% Compute robust F-statistic from OLS residuals (first stage with constant)
 resid_ols=Q.resid;
 resid1_ols=resid_ols(:,1:K1);
 iv_trimmed=iv(nlags+1:end,:);
@@ -191,15 +191,15 @@ iv_valid=iv_trimmed(valid_iv,:);
 n_valid=sum(valid_iv);
 
 for xx=1:K1
-    X_fs=iv_valid;
+    X_fs=[ones(n_valid,1) iv_valid];
     y_fs=resid1_ols(valid_iv,xx);
     beta_fs=X_fs\y_fs;
     resid_fs=y_fs-X_fs*beta_fs;
     meat=X_fs'*diag(resid_fs.^2)*X_fs;
     bread=inv(X_fs'*X_fs);
     vcov_robust=bread*meat*bread;
-    SE_robust=sqrt(diag(vcov_robust))';
-    EQ.robustF(xx,:)=(beta_fs'./SE_robust).^2;
+    SE_robust=sqrt(diag(vcov_robust(2:end,2:end)))';
+    EQ.robustF(xx,:)=(beta_fs(2:end)'./SE_robust).^2;
 end
 fprintf('Robust F-statistic: %.4f\n', EQ.robustF);
 
@@ -212,6 +212,8 @@ elseif demm==0 & demmexo==0
     coeff=[Q.coefficients];
 elseif demm==1 & demmexo==0
     coeff=[Q.constants Q.coefficients];
+elseif demm==0 & demmexo==1
+    coeff=[Q.exo Q.coefficients];
 end
 
 % Build matrix of independent variables and dependent for use in the Bayesian part
@@ -247,6 +249,8 @@ elseif demm==0 & demmexo==0
     coeff_prior(:,1:K)=alf1*eye(K);
 elseif demm==1 & demmexo==0
     coeff_prior(:,2:1+K)=alf1*eye(K);
+elseif demm==0 & demmexo==1
+    coeff_prior(:,size(Q.exo,2)+1:size(Q.exo,2)+K)=alf1*eye(K);
 end
 veccoeff_prior=coeff_prior(:);
 
@@ -298,6 +302,8 @@ if demm==1 & demmexo==1
     V_i=[sig.*par_const sig.*repmat(par_exog,1,size(Q.exo,2))];
 elseif demm==1 & demmexo==0
     V_i=sig.*par_const;
+elseif demm==0 & demmexo==1
+    V_i=sig.*repmat(par_exog,1,size(Q.exo,2));
 end
 V_i=[V_i Vtemp];
 
@@ -361,21 +367,21 @@ for xx=1:gibbs+burnin  %Start the Gibbs "loop"
         resid1_draw=u_draw(:,1:K1);
         resid2_draw=u_draw(:,K1+1:K);
 
-        % First stage: regress instrumented residuals on instruments
+        % First stage: regress instrumented residuals on instruments (with constant)
         pred_fs=zeros(n_valid,K1);
         for jj=1:K1
-            X_fs=iv_trimmed(valid_iv,:);
+            X_fs=[ones(n_valid,1) iv_trimmed(valid_iv,:)];
             y_fs=resid1_draw(valid_iv,jj);
             beta_fs=X_fs\y_fs;
             pred_fs(:,jj)=X_fs*beta_fs;
         end
 
-        % Second stage: effects on non-instrumented variables
+        % Second stage: effects on non-instrumented variables (with constant)
         X_mr=zeros(K2,K1);
         for jj=1:K2
             y_ss=resid2_draw(valid_iv,jj);
-            beta_ss=pred_fs\y_ss;
-            X_mr(jj,:)=beta_ss';
+            beta_ss=[ones(n_valid,1) pred_fs]\y_ss;
+            X_mr(jj,:)=beta_ss(2:end)';
         end
 
         % Apply contemporaneous restrictions from lr
@@ -425,6 +431,8 @@ for xx=1:gibbs+burnin  %Start the Gibbs "loop"
             A_temp(1:K,:)=coeff_draw;
         elseif demm==1 & demmexo==0
             A_temp(1:K,:)=coeff_draw(:,2:end);
+        elseif demm==0 & demmexo==1
+            A_temp(1:K,:)=coeff_draw(:,1+size(Q.exo,2):end);
         end
         if nlags>1
             A_temp(K+1:K*nlags,1:K*nlags-K)=eye(K*nlags-K);
@@ -501,6 +509,9 @@ elseif demm==0 & demmexo==0
 elseif demm==1 & demmexo==0
     EQ.constant_mean=mean(coeff_sim(:,1,:),3);
     EQ.coefficient_mean=mean(coeff_sim(:,2:end,:),3);
+elseif demm==0 & demmexo==1
+    EQ.exo_mean=mean(coeff_sim(:,1:size(Q.exo,2),:),3);
+    EQ.coefficient_mean=mean(coeff_sim(:,1+size(Q.exo,2):end,:),3);
 end
 EQ.coeff_sim=coeff_sim;
 
